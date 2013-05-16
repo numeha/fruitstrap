@@ -454,13 +454,33 @@ void gdb_ready_handler(int signum)
     _exit(0);
 }
 
+void check(const char* msg, mach_error_t code) {
+    if (code!=0) {
+        fprintf(stderr,"Error(%d):%s\n",code,msg);
+        exit(-1);
+    }
+}
+
 void handle_device(AMDeviceRef device) {
     if (found_device) return; // handle one device only
-
-    CFStringRef found_device_id = AMDeviceCopyDeviceIdentifier(device);
-
+    
+    CFStringRef id = AMDeviceCopyDeviceIdentifier(device);
+    CFRelease(id);
+    
+    check("Connecting to device", AMDeviceConnect(device));
+    check("Validate pairing", AMDeviceValidatePairing(device));
+    check("Starting a session", AMDeviceStartSession(device));
+    
+    char* prop = "UniqueDeviceID";
+    CFStringRef cprop = CFStringCreateWithCString(NULL, prop, kCFStringEncodingUTF8);
+    CFStringRef found_device_id = AMDeviceCopyValue(device, 0, cprop);
+    int cflen = CFStringGetMaximumSizeForEncoding(CFStringGetLength(found_device_id), kCFStringEncodingUTF8);
+    char* found_device_id_p = (char*)malloc(cflen + 1);
+    
+    CFStringGetCString(found_device_id, found_device_id_p, cflen, kCFStringEncodingUTF8);
+    
     if (device_id != NULL) {
-        if(strcmp(device_id, CFStringGetCStringPtr(found_device_id, CFStringGetSystemEncoding())) == 0) {
+        if(strcmp(device_id, found_device_id_p) == 0) {
             found_device = true;
         } else {
             return;
@@ -469,14 +489,7 @@ void handle_device(AMDeviceRef device) {
         found_device = true;
     }
 
-    CFRetain(device); // don't know if this is necessary?
-
     printf("[  0%%] Found device (%s), beginning install\n", CFStringGetCStringPtr(found_device_id, CFStringGetSystemEncoding()));
-
-    AMDeviceConnect(device);
-    assert(AMDeviceIsPaired(device));
-    assert(AMDeviceValidatePairing(device) == 0);
-    assert(AMDeviceStartSession(device) == 0);
 
     CFStringRef path = CFStringCreateWithCString(NULL, app_path, kCFStringEncodingASCII);
     CFURLRef relative_url = CFURLCreateWithFileSystemPath(NULL, path, kCFURLPOSIXPathStyle, false);
